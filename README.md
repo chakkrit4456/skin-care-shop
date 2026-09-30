@@ -22,7 +22,7 @@
 cd /var/www
 git clone https://github.com/chakkrit4456/skin-care-shop.git
 cd skin-care-shop
-sudo ./install.sh
+./install.sh
 ```
 
 สคริปต์ถามว่าจะเปลี่ยนรหัสแอดมินหรือไม่ เปิด `http://<ip-เซิร์ฟเวอร์>/` (พอร์ตตามที่ตอบตอนติดตั้ง ค่าเริ่มต้นคือ 80)
@@ -32,13 +32,13 @@ sudo ./install.sh
 ### อัปเดตเวอร์ชัน
 
 ```bash
-git pull && sudo ./install.sh
+git pull && ./install.sh
 ```
 
 ### Backup (ใส่ใน crontab)
 
 ```bash
-0 3 * * * sudo -u postgres pg_dump price | gzip > /backup/price-$(date +\%F).sql.gz
+0 3 * * * runuser -u postgres -- pg_dump price | gzip > /backup/price-$(date +\%F).sql.gz
 0 3 * * * tar czf /backup/uploads-$(date +\%F).tgz -C /var/lib/price-app uploads
 ```
 
@@ -46,7 +46,7 @@ git pull && sudo ./install.sh
 
 1. LINE Developers > สร้าง Messaging API channel > ออก Channel access token
 2. เชิญบอทเข้ากลุ่มร้าน แล้วหา group ID (หรือใช้ user ID ของเจ้าของร้าน)
-3. ใส่ `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_TARGET_ID` ใน `/etc/price-app.env` แล้ว `sudo systemctl restart price-api`
+3. ใส่ `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_TARGET_ID` ใน `/etc/price-app.env` แล้ว `systemctl restart price-api`
 
 ปุ่ม "ส่งทาง LINE" ฝั่งลูกค้าแสดงเมื่อใส่ `LINE_OA_ID` (ต้อง build web ใหม่)
 

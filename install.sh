@@ -3,7 +3,7 @@
 # Node 24 is placed at /opt/node so the appliance's Node 20 is left in place.
 # The git checkout may live at /var/www or /var/www/<repo>. The published site
 # is never written over that checkout.
-# No Docker. Run from the repo root: sudo ./install.sh
+# No Docker. Run from the repo root as root: ./install.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,7 +16,8 @@ STATE_FILE="/etc/price-app.install"
 API_PORT="3000"
 
 if [[ "${EUID}" -ne 0 ]]; then
-  exec sudo bash "$ROOT/install.sh" "$@"
+  echo "ต้องรันด้วยผู้ใช้ root"
+  exit 1
 fi
 
 if [[ ! -t 0 ]]; then
@@ -331,25 +332,25 @@ assert_oneline "LINE target" "$LINE_TARGET_ID"
 
 echo "กำลังเตรียมฐานข้อมูล..."
 for _ in $(seq 1 30); do
-  if sudo -u postgres pg_isready -q; then
+  if runuser -u postgres -- pg_isready -q; then
     break
   fi
   sleep 1
 done
-if ! sudo -u postgres pg_isready -q; then
+if ! runuser -u postgres -- pg_isready -q; then
   echo "PostgreSQL ยังไม่พร้อม"
   exit 1
 fi
 
-role_exists="$(sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='price'")"
+role_exists="$(runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='price'")"
 if [[ "$role_exists" == "1" ]]; then
-  sudo -u postgres psql -v ON_ERROR_STOP=1 -c "ALTER USER price WITH PASSWORD '${POSTGRES_PASSWORD}'"
+  runuser -u postgres -- psql -v ON_ERROR_STOP=1 -c "ALTER USER price WITH PASSWORD '${POSTGRES_PASSWORD}'"
 else
-  sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE USER price WITH PASSWORD '${POSTGRES_PASSWORD}'"
+  runuser -u postgres -- psql -v ON_ERROR_STOP=1 -c "CREATE USER price WITH PASSWORD '${POSTGRES_PASSWORD}'"
 fi
-db_exists="$(sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='price'")"
+db_exists="$(runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_database WHERE datname='price'")"
 if [[ "$db_exists" != "1" ]]; then
-  sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE price OWNER price"
+  runuser -u postgres -- psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE price OWNER price"
 fi
 if ! PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -U price -d price -c "SELECT 1" >/dev/null; then
   echo "ต่อฐานข้อมูล price ไม่สำเร็จ ตรวจว่า pg_hba.conf อนุญาต 127.0.0.1 ด้วย scram-sha-256"
@@ -638,6 +639,6 @@ fi
 if [[ "$use_tunnel" == true ]]; then
   echo "Tunnel ทำงานอยู่ ตั้ง public hostname ใน Cloudflare ให้ชี้มาที่ http://127.0.0.1:${WEB_PORT}"
 fi
-echo "อัปเดตทีหลัง: git pull แล้วรัน sudo ./install.sh อีกครั้ง"
+echo "อัปเดตทีหลัง: git pull แล้วรัน ./install.sh อีกครั้ง"
 echo "ค่าลับของ API อยู่ที่ ${ENV_FILE}"
 echo "ดูล็อก API: journalctl -u price-api -f"
