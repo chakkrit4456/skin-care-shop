@@ -156,7 +156,7 @@ load_env() {
     if [[ "$val" =~ ^\'(.*)\'$ ]]; then val="${BASH_REMATCH[1]}"; fi
     if [[ "$val" =~ ^\"(.*)\"$ ]]; then val="${BASH_REMATCH[1]}"; fi
     case "$key" in
-      POSTGRES_PASSWORD|JWT_SECRET|ADMIN_USERNAME|ADMIN_PASSWORD|LINE_CHANNEL_ACCESS_TOKEN|LINE_TARGET_ID|LINE_OA_ID|CLOUDFLARE_TUNNEL_TOKEN|WEB_PORT|SKIP_SEED)
+      POSTGRES_PASSWORD|JWT_SECRET|ADMIN_USERNAME|ADMIN_PASSWORD|LINE_CHANNEL_ACCESS_TOKEN|LINE_TARGET_ID|LINE_OA_ID|CLOUDFLARE_TUNNEL_TOKEN|WEB_PORT|SKIP_SEED|ANDROID_ORIGIN)
         printf -v "$key" '%s' "$val"
         ;;
     esac
@@ -195,6 +195,7 @@ LINE_OA_ID=""
 CLOUDFLARE_TUNNEL_TOKEN=""
 WEB_PORT="80"
 SKIP_SEED="true"
+ANDROID_ORIGIN=""
 
 if [[ -f "$STATE_FILE" ]]; then
   load_env "$STATE_FILE"
@@ -215,6 +216,22 @@ if [[ ! "$WEB_PORT" =~ ^[0-9]+$ ]] || (( WEB_PORT < 1 || WEB_PORT > 65535 )); th
   echo "พอร์ตไม่ถูกต้อง"
   exit 1
 fi
+
+lan_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+[[ -z "$lan_ip" ]] && lan_ip="127.0.0.1"
+if [[ -z "$ANDROID_ORIGIN" ]]; then
+  ANDROID_ORIGIN="http://${lan_ip}"
+  [[ "$WEB_PORT" != "80" ]] && ANDROID_ORIGIN="${ANDROID_ORIGIN}:${WEB_PORT}"
+fi
+read -r -p "ที่อยู่เว็บที่มือถือใช้เปิดร้าน [${ANDROID_ORIGIN}]: " reply
+ANDROID_ORIGIN="${reply:-$ANDROID_ORIGIN}"
+ANDROID_ORIGIN="${ANDROID_ORIGIN%/}"
+if [[ ! "$ANDROID_ORIGIN" =~ ^https?://[^[:space:]/]+(:[0-9]+)?(/[^[:space:]]*)?$ ]]; then
+  echo "ที่อยู่เว็บต้องขึ้นต้นด้วย http:// หรือ https://"
+  exit 1
+fi
+assert_oneline "ที่อยู่เว็บ" "$ANDROID_ORIGIN"
+ANDROID_API="${ANDROID_ORIGIN}/api"
 
 read -r -p "ชื่อผู้ใช้แอดมิน [${ADMIN_USERNAME}]: " reply
 ADMIN_USERNAME="${reply:-$ADMIN_USERNAME}"
@@ -354,6 +371,67 @@ echo "กำลัง build หน้าเว็บ (ครั้งแรก�
   flutter build web --release --dart-define=API_URL=/api --dart-define="LINE_OA_ID=${LINE_OA_ID}"
 )
 
+ANDROID_SDK="/opt/android-sdk"
+install_android_sdk() {
+  if ! command -v java >/dev/null 2>&1; then
+    echo "กำลังติดตั้ง Java สำหรับสร้างไฟล์ APK..."
+    apt-get install -y openjdk-17-jdk-headless
+  fi
+  export JAVA_HOME
+  JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")"
+  export PATH="${JAVA_HOME}/bin:${PATH}"
+  if [[ ! -x "$ANDROID_SDK/cmdline-tools/latest/bin/sdkmanager" ]]; then
+    echo "กำลังติดตั้ง Android SDK..."
+    local tmp
+    tmp="$(mktemp -d)"
+    curl -fL "https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip" -o "$tmp/cmdtools.zip"
+    mkdir -p "$ANDROID_SDK/cmdline-tools"
+    unzip -q "$tmp/cmdtools.zip" -d "$tmp"
+    rm -rf "$ANDROID_SDK/cmdline-tools/latest"
+    mv "$tmp/cmdline-tools" "$ANDROID_SDK/cmdline-tools/latest"
+    rm -rf "$tmp"
+  fi
+  export ANDROID_HOME="$ANDROID_SDK"
+  export ANDROID_SDK_ROOT="$ANDROID_SDK"
+  export PATH="${ANDROID_SDK}/cmdline-tools/latest/bin:${PATH}"
+  set +o pipefail
+  yes | sdkmanager --licenses >/dev/null || true
+  set -o pipefail
+  sdkmanager "platform-tools"
+}
+
+build_android_apk() {
+  install_android_sdk
+  local stamp stamp_file current apk_out
+  apk_out="$ROOT/price_app/build/app/outputs/flutter-apk/app-release.apk"
+  stamp_file="/var/lib/price-app/apk.stamp"
+  stamp="$(
+    cd "$ROOT/price_app"
+    find lib pubspec.yaml pubspec.lock android -type f \
+      ! -path 'android/.gradle/*' \
+      ! -path 'android/build/*' \
+      ! -path 'android/app/build/*' \
+      ! -name local.properties \
+      -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}'
+  )"
+  current="${stamp} ${ANDROID_API}"
+  if [[ -f "$apk_out" && -f "$stamp_file" && "$(tr -d '\r' <"$stamp_file")" == "$current" ]]; then
+    echo "ใช้ไฟล์ APK เดิม"
+    return 0
+  fi
+  echo "กำลังสร้างไฟล์ APK (ครั้งแรกใช้เวลานาน และจะมีข้อความจาก Gradle)..."
+  (
+    cd "$ROOT/price_app"
+    flutter build apk --release --dart-define="API_URL=${ANDROID_API}" --dart-define="LINE_OA_ID=${LINE_OA_ID}"
+  )
+  mkdir -p /var/lib/price-app
+  printf '%s\n' "$current" >"$stamp_file"
+}
+
+if ! build_android_apk; then
+  echo "สร้าง APK ไม่สำเร็จ เว็บจะถูกติดตั้งต่อ แต่ปุ่ม Android ยังโหลดไฟล์ไม่ได้"
+fi
+
 if ! id priceapp >/dev/null 2>&1; then
   useradd --system --no-create-home --shell /usr/sbin/nologin priceapp
 fi
@@ -364,6 +442,11 @@ echo "กำลังวางไฟล์แอป..."
 rsync -a --delete --exclude node_modules "$ROOT/server/api/" "$APP_DIR/api/"
 rsync -a --delete "$ROOT/server/db/" "$APP_DIR/db/"
 rsync -a --delete "$ROOT/price_app/build/web/" "$WEB_ROOT/"
+apk_pub="$ROOT/price_app/build/app/outputs/flutter-apk/app-release.apk"
+if [[ -f "$apk_pub" ]]; then
+  install -d -o www-data -g www-data -m 755 "$WEB_ROOT/downloads"
+  install -o www-data -g www-data -m 644 "$apk_pub" "$WEB_ROOT/downloads/taeia.apk"
+fi
 chown -R www-data:www-data "$WEB_ROOT"
 (
   cd "$APP_DIR/api"
@@ -412,6 +495,7 @@ write_state() {
     printf 'CLOUDFLARE_TUNNEL_TOKEN=%s\n' "$CLOUDFLARE_TUNNEL_TOKEN"
     printf 'WEB_PORT=%s\n' "$WEB_PORT"
     printf 'SKIP_SEED=%s\n' "$SKIP_SEED"
+    printf 'ANDROID_ORIGIN=%s\n' "$ANDROID_ORIGIN"
   } >"$STATE_FILE"
   chmod 600 "$STATE_FILE"
   umask "$old_umask"
@@ -538,6 +622,9 @@ if [[ "$WEB_PORT" == "80" ]]; then
   echo "เปิดเว็บที่ http://${ip:-เซิร์ฟเวอร์}/"
 else
   echo "เปิดเว็บที่ http://${ip:-เซิร์ฟเวอร์}:${WEB_PORT}/"
+fi
+if [[ -f "$WEB_ROOT/downloads/taeia.apk" ]]; then
+  echo "ปุ่ม Android ดาวน์โหลดไฟล์ ${ANDROID_ORIGIN}/downloads/taeia.apk"
 fi
 if [[ "$generated_pw" == true ]]; then
   echo "รหัสแอดมินที่สร้างให้ (แสดงครั้งนี้ครั้งเดียว):"

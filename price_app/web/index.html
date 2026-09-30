@@ -71,6 +71,14 @@
         if (/android/i.test(ua)) return 'android';
         return 'other';
       };
+      window.downloadAndroidApk = function () {
+        var a = document.createElement('a');
+        a.href = '/downloads/taeia.apk';
+        a.download = 'taeia.apk';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      };
       window.installAndroidApp = function () {
         if (!deferredPrompt) return Promise.resolve('unavailable');
         var pending = deferredPrompt;

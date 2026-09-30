@@ -6,21 +6,14 @@ import '../../core/pwa_install.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 
-/// Compact install control beside the cart. Android uses the browser prompt.
+/// Compact install control beside the cart. Android downloads an APK.
 /// iOS installs as a home-screen PWA.
-class InstallAppButton extends StatefulWidget {
+class InstallAppButton extends StatelessWidget {
   const InstallAppButton({super.key});
 
   @override
-  State<InstallAppButton> createState() => _InstallAppButtonState();
-}
-
-class _InstallAppButtonState extends State<InstallAppButton> {
-  bool _hide = false;
-
-  @override
   Widget build(BuildContext context) {
-    if (!kIsWeb || _hide || isStandalonePwa) return const SizedBox.shrink();
+    if (!kIsWeb || isStandalonePwa) return const SizedBox.shrink();
     return PopupMenuButton<String>(
       tooltip: t(context, 'install_title'),
       offset: const Offset(0, 40),
@@ -29,7 +22,8 @@ class _InstallAppButtonState extends State<InstallAppButton> {
         if (value == 'ios') {
           showInstallGuide(context, ios: true);
         } else {
-          _android();
+          downloadAndroidApk();
+          showMessage(context, t(context, 'install_apk_started'));
         }
       },
       itemBuilder: (context) => [
@@ -47,16 +41,6 @@ class _InstallAppButtonState extends State<InstallAppButton> {
     );
   }
 
-  Future<void> _android() async {
-    final outcome = await promptAndroidInstall();
-    if (!mounted) return;
-    if (outcome == 'accepted') {
-      setState(() => _hide = true);
-      showMessage(context, t(context, 'install_done'));
-      return;
-    }
-    if (outcome == 'unavailable') showInstallGuide(context, ios: false);
-  }
 }
 
 class _MenuLine extends StatelessWidget {
