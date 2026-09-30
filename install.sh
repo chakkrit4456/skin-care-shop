@@ -93,19 +93,27 @@ install_node() {
     [[ "$major" -ge 24 ]] && return 0
   fi
   echo "กำลังติดตั้ง Node.js 24 ที่ ${NODE_HOME}..."
+  echo "กำลังดาวน์โหลดจาก nodejs.org ขั้นนี้มีแถบความคืบหน้า ไม่ได้ค้าง"
   local arch ver dest
   case "$(dpkg --print-architecture)" in
     amd64) arch="x64" ;;
     arm64) arch="arm64" ;;
     *) echo "ไม่รองรับสถาปัตยกรรมสำหรับ Node.js"; exit 1 ;;
   esac
-  ver="$(curl -fsSL https://nodejs.org/dist/index.json | jq -r '[.[] | select(.version|startswith("v24."))][0].version')"
+  local curl_opts=(-fL --connect-timeout 20 --retry 3 --retry-delay 2 --retry-all-errors)
+  if ! ver="$(curl "${curl_opts[@]}" -4 https://nodejs.org/dist/index.json | jq -r '[.[] | select(.version|startswith("v24."))][0].version')"; then
+    ver="$(curl "${curl_opts[@]}" https://nodejs.org/dist/index.json | jq -r '[.[] | select(.version|startswith("v24."))][0].version')"
+  fi
   if [[ -z "$ver" || "$ver" == "null" ]]; then
     echo "หา Node.js 24 ไม่เจอ"
     exit 1
   fi
   dest="/opt/node-${ver}"
-  curl -fsSL "https://nodejs.org/dist/${ver}/node-${ver}-linux-${arch}.tar.xz" -o /tmp/node.tar.xz
+  echo "กำลังดาวน์โหลด ${ver}..."
+  if ! curl "${curl_opts[@]}" -4 "https://nodejs.org/dist/${ver}/node-${ver}-linux-${arch}.tar.xz" -o /tmp/node.tar.xz; then
+    curl "${curl_opts[@]}" "https://nodejs.org/dist/${ver}/node-${ver}-linux-${arch}.tar.xz" -o /tmp/node.tar.xz
+  fi
+  echo "กำลังแตกไฟล์ Node.js..."
   rm -rf "$dest"
   mkdir -p "$dest"
   tar -C "$dest" --strip-components=1 -xf /tmp/node.tar.xz
