@@ -127,14 +127,43 @@ install_node() {
   fi
 }
 
+download_resumable() {
+  local url="$1" dest="$2" attempt status
+  mkdir -p "$(dirname "$dest")"
+  for attempt in $(seq 1 40); do
+    echo "กำลังดาวน์โหลด ${url##*/} ครั้งที่ ${attempt} (ถ้าหลุดจะต่อจากจุดเดิม)..."
+    set +e
+    curl -fL --connect-timeout 30 --retry 5 --retry-delay 5 --retry-all-errors \
+      --speed-limit 500 --speed-time 180 \
+      -C - -4 "$url" -o "$dest"
+    status=$?
+    if [[ "$status" -ne 0 && "$status" -ne 33 ]]; then
+      curl -fL --connect-timeout 30 --retry 5 --retry-delay 5 --retry-all-errors \
+        --speed-limit 500 --speed-time 180 \
+        -C - "$url" -o "$dest"
+      status=$?
+    fi
+    set -e
+    if [[ "$status" -eq 0 || "$status" -eq 33 ]]; then
+      return 0
+    fi
+    echo "ดาวน์โหลดขาด จะลองใหม่ใน 10 วินาที..."
+    sleep 10
+  done
+  echo "ดาวน์โหลดไม่สำเร็จ: $url"
+  return 1
+}
+
 install_flutter() {
   if [[ -x /opt/flutter/bin/flutter ]]; then
     return 0
   fi
-  echo "กำลังดาวน์โหลด Flutter SDK..."
-  local json base archive arch
+  echo "กำลังดาวน์โหลด Flutter SDK (ไฟล์ใหญ่ประมาณ 1.5GB)..."
+  local json base archive arch flutter_tar
   arch="$(dpkg --print-architecture)"
-  json="$(curl -fsSL https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json)"
+  if ! json="$(curl -fL --connect-timeout 20 --retry 3 --retry-all-errors -4 https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json)"; then
+    json="$(curl -fL --connect-timeout 20 --retry 3 --retry-all-errors https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json)"
+  fi
   base="$(jq -r '.base_url' <<<"$json")"
   if [[ "$arch" == "arm64" ]]; then
     archive="$(jq -r '[.releases[] | select(.channel=="stable" and (.archive|contains("flutter_linux_arm64_")))][0].archive' <<<"$json")"
@@ -148,10 +177,25 @@ install_flutter() {
     echo "หาไฟล์ Flutter ไม่เจอ"
     exit 1
   fi
-  curl -fL "${base}/${archive}" -o /tmp/flutter.tar.xz
+  flutter_tar="/var/cache/price-app/flutter.tar.xz"
+  mkdir -p /var/cache/price-app
+  if [[ -f /tmp/flutter.tar.xz ]]; then
+    if [[ ! -f "$flutter_tar" ]] || [[ "$(stat -c%s /tmp/flutter.tar.xz)" -gt "$(stat -c%s "$flutter_tar")" ]]; then
+      echo "พบไฟล์ Flutter ที่โหลดค้างไว้ จะดาวน์โหลดต่อ"
+      mv -f /tmp/flutter.tar.xz "$flutter_tar"
+    fi
+  fi
+  download_resumable "${base}/${archive}" "$flutter_tar"
+  echo "กำลังตรวจว่าไฟล์ Flutter ครบ..."
+  if ! xz -t "$flutter_tar"; then
+    echo "ไฟล์ที่โหลดไว้ไม่สมบูรณ์ จะเริ่มดาวน์โหลดใหม่"
+    rm -f "$flutter_tar"
+    download_resumable "${base}/${archive}" "$flutter_tar"
+    xz -t "$flutter_tar"
+  fi
   rm -rf /opt/flutter
-  tar -C /opt -xf /tmp/flutter.tar.xz
-  rm -f /tmp/flutter.tar.xz
+  tar -C /opt -xf "$flutter_tar"
+  rm -f "$flutter_tar"
 }
 
 load_env() {
