@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Install the shop on TurnKey Node.js (Debian) or plain Debian.
 # Node 24 is placed at /opt/node so the appliance's Node 20 is left in place.
+# The git checkout may live at /var/www or /var/www/<repo>. The published site
+# is never written over that checkout.
 # No Docker. Run from the repo root: sudo ./install.sh
 set -euo pipefail
 
@@ -26,6 +28,19 @@ if [[ ! -f "$ROOT/price_app/pubspec.yaml" || ! -f "$ROOT/server/api/package.json
   echo "ไม่พบโปรเจกต์ครบถ้วน ให้รัน install.sh จากโฟลเดอร์รากของ repo"
   exit 1
 fi
+
+ROOT="$(readlink -m "$ROOT")"
+web_real="$(readlink -m "$WEB_ROOT")"
+if [[ "$web_real" == "$ROOT" || "$ROOT" == "$web_real"/* || "$web_real" == "$ROOT"/* ]]; then
+  echo "โปรเจกต์อยู่ใต้ ${ROOT} จึงเสิร์ฟหน้าเว็บจาก /var/lib/price-app/www เพื่อไม่ทับซอร์ส"
+  WEB_ROOT="/var/lib/price-app/www"
+  web_real="$(readlink -m "$WEB_ROOT")"
+fi
+if [[ "$web_real" == "$ROOT" || "$ROOT" == "$web_real"/* || "$web_real" == "$ROOT"/* ]]; then
+  echo "โฟลเดอร์โปรเจกต์ ${ROOT} ทับที่ที่จะวางหน้าเว็บ"
+  exit 1
+fi
+echo "ใช้ซอร์สจาก ${ROOT}"
 
 if [[ -r /etc/os-release ]]; then
   # shellcheck disable=SC1091

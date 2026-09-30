@@ -16,11 +16,10 @@
 
 เครื่อง TurnKey มี Node.js 20, nginx และหน้าตัวอย่างที่พอร์ต 80 อยู่แล้ว สคริปต์ไม่ทับ Node ของเครื่อง แต่ติดตั้ง Node.js 24 ที่ `/opt/node` เพิ่ม PostgreSQL แล้ว build หน้าเว็บให้เอง จากนั้นให้ร้านใช้พอร์ต 80 แทนหน้าตัวอย่าง Webmin ยังอยู่ที่พอร์ต 12321
 
-โคลนไว้ที่ `/opt/src` ไม่ใช่ `/var` หรือ `/opt/price-app` เพราะสองที่หลังเป็นที่ที่สคริปต์วางไฟล์ที่รันจริง
+โคลนไว้ที่ `/var/www` ได้ สคริปต์จะไม่เขียนหน้าเว็บทับโฟลเดอร์ที่โคลน
 
 ```bash
-mkdir -p /opt/src
-cd /opt/src
+cd /var/www
 git clone https://github.com/chakkrit4456/skin-care-shop.git
 cd skin-care-shop
 sudo ./install.sh
