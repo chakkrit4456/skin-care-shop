@@ -70,9 +70,17 @@ if [[ "${free_kb:-0}" -lt 6000000 ]]; then
 fi
 
 echo "กำลังติดตั้ง PostgreSQL, nginx และเครื่องมือ build..."
+echo "ขั้นนี้ไม่ได้ค้าง กำลังดาวน์โหลดแพ็กเกจ อาจใช้หลายนาที"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq ca-certificates curl openssl git unzip xz-utils zip jq rsync nginx postgresql
+export APT_LISTCHANGES_FRONTEND=none
+export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1
+apt-get update -o Acquire::Retries=3
+apt-get install -y \
+  -o Dpkg::Options::=--force-confdef \
+  -o Dpkg::Options::=--force-confold \
+  -o Dpkg::Use-Pty=0 \
+  ca-certificates curl openssl git unzip xz-utils zip jq rsync nginx postgresql
 
 systemctl enable --now postgresql
 systemctl enable --now nginx
