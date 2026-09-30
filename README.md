@@ -3,7 +3,7 @@
 - `price_app/` - แอป Flutter (Android / iOS / Web)
 - `server/api/` - Node.js (Fastify) API: สมาชิก JWT, สินค้า, ออเดอร์, หลังร้าน, อัปโหลดรูป, แจ้ง LINE
 - `server/db/` - SQL schema (`001_init.sql`) และข้อมูลตัวอย่าง (`002_seed.sql`) รันอัตโนมัติตอน API เริ่ม
-- `install.sh` - ติดตั้งบน Debian โดยไม่ใช้ Docker
+- `install.sh` - ติดตั้งบน TurnKey Node.js / Debian โดยไม่ใช้ Docker
 - `index.html` - ต้นแบบเดิม (ไม่ใช้แล้ว)
 
 ```
@@ -12,16 +12,21 @@
                      -> ไฟล์เว็บ Flutter
 ```
 
-## Deploy บน Debian 13
+## Deploy บน TurnKey Node.js (Debian 13)
 
-สคริปต์ติดตั้ง PostgreSQL, Node.js 24, nginx และ build หน้าเว็บให้เอง แล้วถามว่าจะเปลี่ยนรหัสแอดมินหรือไม่
+เครื่อง TurnKey มี Node.js 20, nginx และหน้าตัวอย่างที่พอร์ต 80 อยู่แล้ว สคริปต์ไม่ทับ Node ของเครื่อง แต่ติดตั้ง Node.js 24 ที่ `/opt/node` เพิ่ม PostgreSQL แล้ว build หน้าเว็บให้เอง จากนั้นให้ร้านใช้พอร์ต 80 แทนหน้าตัวอย่าง Webmin ยังอยู่ที่พอร์ต 12321
+
+โคลนไว้ที่ `/opt/src` ไม่ใช่ `/var` หรือ `/opt/price-app` เพราะสองที่หลังเป็นที่ที่สคริปต์วางไฟล์ที่รันจริง
 
 ```bash
-git clone <repo> price-app && cd price-app
+mkdir -p /opt/src
+cd /opt/src
+git clone https://github.com/chakkrit4456/skin-care-shop.git
+cd skin-care-shop
 sudo ./install.sh
 ```
 
-เปิด `http://<ip-เซิร์ฟเวอร์>/` (พอร์ตตามที่ตอบตอนติดตั้ง ค่าเริ่มต้นคือ 80)
+สคริปต์ถามว่าจะเปลี่ยนรหัสแอดมินหรือไม่ เปิด `http://<ip-เซิร์ฟเวอร์>/` (พอร์ตตามที่ตอบตอนติดตั้ง ค่าเริ่มต้นคือ 80)
 
 ถ้าใช้ Cloudflare Tunnel ให้ตอบ yes แล้วตั้ง public hostname ชี้มาที่ `HTTP` `http://127.0.0.1:<พอร์ตเว็บ>`
 

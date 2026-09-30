@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Install the shop on the server itself: PostgreSQL, Node.js, nginx, and the API.
+# Install the shop on TurnKey Node.js (Debian) or plain Debian.
+# Node 24 is placed at /opt/node so the appliance's Node 20 is left in place.
 # No Docker. Run from the repo root: sudo ./install.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="/opt/price-app"
+NODE_HOME="/opt/node"
 WEB_ROOT="/var/www/price-app"
 UPLOAD_DIR="/var/lib/price-app/uploads"
 ENV_FILE="/etc/price-app.env"
@@ -29,8 +31,18 @@ if [[ -r /etc/os-release ]]; then
   # shellcheck disable=SC1091
   . /etc/os-release
 fi
-if [[ "${ID:-}" != "debian" ]]; then
-  echo "เครื่องนี้ไม่ใช่ Debian (${ID:-unknown}) สคริปต์จัดไว้สำหรับ Debian 13 และจะทำต่อ"
+TURNKEY=false
+if [[ -f /etc/turnkey_version || -f /etc/nginx/sites-available/nodejs ]]; then
+  TURNKEY=true
+fi
+if [[ "$TURNKEY" == true ]]; then
+  echo "TurnKey Node.js บน Debian ${VERSION_ID:-?}"
+  if [[ -f /etc/turnkey_version ]]; then
+    echo "รุ่น: $(tr -d '\r' </etc/turnkey_version)"
+  fi
+  echo "จะติดตั้ง Node.js 24 ที่ /opt/node โดยไม่ทับ Node ของเครื่อง"
+elif [[ "${ID:-}" != "debian" ]]; then
+  echo "เครื่องนี้ไม่ใช่ Debian (${ID:-unknown}) สคริปต์จัดไว้สำหรับ TurnKey Node.js / Debian และจะทำต่อ"
 elif [[ "${VERSION_ID:-}" != "13" ]]; then
   echo "พบ Debian ${VERSION_ID:-?} สคริปต์จัดไว้สำหรับ Debian 13 และจะทำต่อ"
 else
@@ -51,32 +63,34 @@ systemctl enable --now postgresql
 systemctl enable --now nginx
 
 install_node() {
-  if command -v node >/dev/null 2>&1; then
+  if [[ -x "$NODE_HOME/bin/node" ]]; then
     local major
-    major="$(node -p 'process.versions.node.split(".")[0]')"
+    major="$("$NODE_HOME/bin/node" -p 'process.versions.node.split(".")[0]')"
     [[ "$major" -ge 24 ]] && return 0
   fi
-  echo "กำลังติดตั้ง Node.js 24..."
-  if curl -fsSL https://deb.nodesource.com/setup_24.x | bash -; then
-    apt-get install -y nodejs || true
+  echo "กำลังติดตั้ง Node.js 24 ที่ ${NODE_HOME}..."
+  local arch ver dest
+  case "$(dpkg --print-architecture)" in
+    amd64) arch="x64" ;;
+    arm64) arch="arm64" ;;
+    *) echo "ไม่รองรับสถาปัตยกรรมสำหรับ Node.js"; exit 1 ;;
+  esac
+  ver="$(curl -fsSL https://nodejs.org/dist/index.json | jq -r '[.[] | select(.version|startswith("v24."))][0].version')"
+  if [[ -z "$ver" || "$ver" == "null" ]]; then
+    echo "หา Node.js 24 ไม่เจอ"
+    exit 1
   fi
-  if ! command -v node >/dev/null 2>&1 || [[ "$(node -p 'process.versions.node.split(".")[0]')" -lt 24 ]]; then
-    local arch ver
-    case "$(dpkg --print-architecture)" in
-      amd64) arch="x64" ;;
-      arm64) arch="arm64" ;;
-      *) echo "ไม่รองรับสถาปัตยกรรมสำหรับ Node.js"; exit 1 ;;
-    esac
-    ver="$(curl -fsSL https://nodejs.org/dist/index.json | jq -r '[.[] | select(.version|startswith("v24."))][0].version')"
-    curl -fsSL "https://nodejs.org/dist/${ver}/node-${ver}-linux-${arch}.tar.xz" -o /tmp/node.tar.xz
-    tar -C /usr/local --strip-components=1 -xf /tmp/node.tar.xz
-    rm -f /tmp/node.tar.xz
-    hash -r
-  fi
+  dest="/opt/node-${ver}"
+  curl -fsSL "https://nodejs.org/dist/${ver}/node-${ver}-linux-${arch}.tar.xz" -o /tmp/node.tar.xz
+  rm -rf "$dest"
+  mkdir -p "$dest"
+  tar -C "$dest" --strip-components=1 -xf /tmp/node.tar.xz
+  rm -f /tmp/node.tar.xz
+  ln -sfn "$dest" "$NODE_HOME"
   local got
-  got="$(node -p 'process.versions.node.split(".")[0]')"
+  got="$("$NODE_HOME/bin/node" -p 'process.versions.node.split(".")[0]')"
   if [[ "$got" -lt 24 ]]; then
-    echo "ต้องใช้ Node.js 24 ขึ้นไป ได้เวอร์ชัน $(node -v)"
+    echo "ต้องใช้ Node.js 24 ขึ้นไป ได้เวอร์ชัน $("$NODE_HOME/bin/node" -v)"
     exit 1
   fi
 }
@@ -304,7 +318,7 @@ fi
 
 install_node
 install_flutter
-export PATH="/opt/flutter/bin:${PATH}"
+export PATH="${NODE_HOME}/bin:/opt/flutter/bin:${PATH}"
 export PUB_CACHE="/var/cache/flutter-pub"
 export CI=true
 mkdir -p "$PUB_CACHE"
@@ -383,7 +397,7 @@ write_state() {
 write_env "$sync_flag"
 write_state
 
-node_bin="$(command -v node)"
+node_bin="${NODE_HOME}/bin/node"
 cat > /etc/systemd/system/price-api.service <<EOF
 [Unit]
 Description=Price shop API
@@ -414,9 +428,16 @@ sed -e "s|@@WEB_PORT@@|${WEB_PORT}|g" \
     -e "s|@@UPLOAD_DIR@@|${UPLOAD_DIR}|g" \
     "$ROOT/server/nginx.conf" > /etc/nginx/sites-available/price-app
 ln -sfn /etc/nginx/sites-available/price-app /etc/nginx/sites-enabled/price-app
-if [[ "$WEB_PORT" == "80" ]]; then
-  rm -f /etc/nginx/sites-enabled/default
-fi
+shopt -s nullglob
+for site in /etc/nginx/sites-enabled/*; do
+  base="$(basename "$site")"
+  [[ "$base" == "price-app" ]] && continue
+  if grep -Eq "listen[[:space:]]+([^;]*:)?${WEB_PORT}([^0-9]|$)" "$site"; then
+    echo "ปิดเว็บไซต์ ${base} ที่ใช้พอร์ต ${WEB_PORT} เพื่อให้ร้านขึ้นแทน"
+    rm -f "$site"
+  fi
+done
+shopt -u nullglob
 nginx -t
 systemctl reload nginx
 
@@ -486,7 +507,10 @@ fi
 
 ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo
-echo "ติดตั้งเสร็จแล้ว โดยไม่ได้ใช้ Docker"
+echo "ติดตั้งเสร็จแล้ว"
+if [[ "$TURNKEY" == true && "$WEB_PORT" == "80" ]]; then
+  echo "หน้าตัวอย่าง TurnKey ไม่ได้ถูกเสิร์ฟที่พอร์ต 80 แล้ว Webmin ยังเปิดที่พอร์ต 12321"
+fi
 if [[ "$WEB_PORT" == "80" ]]; then
   echo "เปิดเว็บที่ http://${ip:-เซิร์ฟเวอร์}/"
 else
