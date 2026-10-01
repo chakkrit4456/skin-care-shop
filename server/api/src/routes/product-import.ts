@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import JSZip from "jszip";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { requireAdmin } from "../auth.ts";
@@ -23,6 +24,85 @@ const headerRules: [Field, RegExp][] = [
 const fallback: Partial<Record<Field, number>> = { image: 2, name: 3, price: 4, promo: 5, category: 6, desc: 7 };
 
 const TEMPLATE_HEADERS = ["ลำดับ", "รูปภาพ", "ชื่อสินค้า", "ราคา (บาท)", "โปรโมชั่น", "หมวดหมู่", "รายละเอียดสินค้า", "ราคา VIP"];
+
+type Picture = { buffer: Buffer; extension: string };
+
+/** Resolves a relationship Target against the folder of the part that owns it. */
+function resolveTarget(baseDir: string, target: string) {
+  if (target.startsWith("/")) return target.slice(1);
+  const parts = `${baseDir}/${target}`.split("/");
+  const out: string[] = [];
+  for (const p of parts) {
+    if (p === "..") out.pop();
+    else if (p && p !== ".") out.push(p);
+  }
+  return out.join("/");
+}
+
+function relsOf(xml: string) {
+  const map = new Map<string, string>();
+  for (const m of xml.matchAll(/<(?:\w+:)?Relationship\b[^>]*>/g)) {
+    const id = /\bId="([^"]+)"/.exec(m[0])?.[1];
+    const target = /\bTarget="([^"]+)"/.exec(m[0])?.[1];
+    if (id && target) map.set(id, target);
+  }
+  return map;
+}
+
+/**
+ * Reads the first sheet's pictures straight from the zip (row number 1-based -> image) and returns
+ * the file with drawings removed. ExcelJS crashes on drawings written by some tools (openpyxl, Google
+ * Sheets: absolute targets, unprefixed namespaces), so cells are parsed from the cleaned copy.
+ */
+async function splitPictures(data: Buffer) {
+  const zip = await JSZip.loadAsync(data);
+  const images = new Map<number, Picture>();
+  const wbRels = relsOf((await zip.file("xl/_rels/workbook.xml.rels")?.async("string")) ?? "");
+  const wbXml = (await zip.file("xl/workbook.xml")?.async("string")) ?? "";
+  const firstSheetRid = /<(?:\w+:)?sheet\b[^>]*\br:id="([^"]+)"/.exec(wbXml)?.[1] ?? /<(?:\w+:)?sheet\b[^>]*\bid="([^"]+)"/.exec(wbXml)?.[1];
+  const sheetTarget = firstSheetRid && wbRels.get(firstSheetRid);
+  const sheetPath = sheetTarget ? resolveTarget("xl", sheetTarget) : "xl/worksheets/sheet1.xml";
+  const sheetDir = sheetPath.slice(0, sheetPath.lastIndexOf("/"));
+  const sheetName = sheetPath.slice(sheetPath.lastIndexOf("/") + 1);
+
+  for (const f of Object.keys(zip.files)) {
+    if (!/^xl\/worksheets\/_rels\/.+\.rels$/.test(f)) continue;
+    const xml = await zip.file(f)!.async("string");
+    const isFirst = f === `${sheetDir}/_rels/${sheetName}.rels`;
+    for (const [, target] of relsOf(xml)) {
+      if (!/drawings\//.test(target)) continue;
+      const drawingPath = resolveTarget(sheetDir, target);
+      if (!isFirst) continue;
+      const drawingXml = (await zip.file(drawingPath)?.async("string")) ?? "";
+      const dDir = drawingPath.slice(0, drawingPath.lastIndexOf("/"));
+      const dName = drawingPath.slice(drawingPath.lastIndexOf("/") + 1);
+      const dRels = relsOf((await zip.file(`${dDir}/_rels/${dName}.rels`)?.async("string")) ?? "");
+      for (const a of drawingXml.matchAll(/<(?:\w+:)?(?:oneCellAnchor|twoCellAnchor|absoluteAnchor)\b[\s\S]*?<\/(?:\w+:)?(?:oneCellAnchor|twoCellAnchor|absoluteAnchor)>/g)) {
+        const row = /<(?:\w+:)?from>[\s\S]*?<(?:\w+:)?row>(\d+)<\/(?:\w+:)?row>/.exec(a[0])?.[1];
+        const embed = /\br:embed="([^"]+)"/.exec(a[0])?.[1] ?? /\bembed="([^"]+)"/.exec(a[0])?.[1];
+        const media = embed && dRels.get(embed);
+        if (row == null || !media) continue;
+        const mediaPath = resolveTarget(dDir, media);
+        const file = zip.file(mediaPath);
+        const r = Number(row) + 1;
+        if (file && !images.has(r)) {
+          images.set(r, { buffer: await file.async("nodebuffer"), extension: mediaPath.split(".").pop() ?? "png" });
+        }
+      }
+    }
+    // Drop drawing links so ExcelJS never touches them.
+    zip.file(f, xml.replace(/<(?:\w+:)?Relationship\b[^>]*drawings\/[^>]*\/>/g, ""));
+  }
+  for (const f of Object.keys(zip.files)) {
+    if (/^xl\/worksheets\/[^/]+\.xml$/.test(f)) {
+      const xml = await zip.file(f)!.async("string");
+      zip.file(f, xml.replace(/<(?:\w+:)?(?:drawing|legacyDrawing)\b[^>]*\/>/g, ""));
+    }
+  }
+  for (const f of Object.keys(zip.files)) if (f.startsWith("xl/drawings/")) zip.remove(f);
+  const cleaned = await zip.generateAsync({ type: "nodebuffer" });
+  return { images, cleaned };
+}
 
 function cellText(v: ExcelJS.CellValue): string {
   if (v == null) return "";
@@ -82,23 +162,18 @@ export async function productImportRoutes(app: FastifyInstance) {
     if (!/\.xlsx$/i.test(file.filename)) return reply.code(400).send({ error: "รองรับเฉพาะไฟล์ .xlsx" });
 
     const wb = new ExcelJS.Workbook();
+    let images: Map<number, Picture>;
     try {
-      await wb.xlsx.load(data as any);
-    } catch {
-      return reply.code(400).send({ error: "อ่านไฟล์ Excel ไม่ได้" });
+      const split = await splitPictures(data);
+      images = split.images;
+      await wb.xlsx.load(split.cleaned as any);
+    } catch (e) {
+      req.log.warn(e, "excel import: cannot read file");
+      return reply.code(400).send({ error: "อ่านไฟล์ Excel ไม่ได้ (บันทึกเป็น .xlsx ใหม่แล้วลองอีกครั้ง)" });
     }
     const ws = wb.worksheets[0];
     if (!ws) return reply.code(400).send({ error: "ไฟล์ไม่มีชีต" });
     const { cols, headerRow } = findColumns(ws);
-
-    // Pictures placed over a row belong to that row (1-based).
-    const media = (wb.model as any).media as { buffer: Buffer; extension: string }[] | undefined;
-    const images = new Map<number, { buffer: Buffer; extension: string }>();
-    for (const img of ws.getImages()) {
-      const m = media?.[Number(img.imageId)];
-      const row = Math.floor(img.range.tl.nativeRow ?? img.range.tl.row) + 1;
-      if (m && !images.has(row)) images.set(row, m);
-    }
 
     const categories = new Map<string, number>(
       (await query<{ id: number; name: string }>("select id, name from categories")).map((c) => [c.name, c.id]),
