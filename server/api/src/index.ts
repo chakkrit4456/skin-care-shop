@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import jwt from "@fastify/jwt";
 import multipart from "@fastify/multipart";
+import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 import { ZodError } from "zod";
 import { authRoutes, ensureAdmin } from "./auth.ts";
@@ -11,6 +13,7 @@ import { addressRoutes } from "./routes/addresses.ts";
 import { adminRoutes } from "./routes/admin.ts";
 import { catalogRoutes } from "./routes/catalog.ts";
 import { orderRoutes } from "./routes/orders.ts";
+import { uploadDir } from "./uploads.ts";
 
 function loadEnvFile(file: string) {
   let text: string;
@@ -53,12 +56,50 @@ app.setErrorHandler((err: Error, _req, reply) => {
   return reply.code(code).send({ error: code >= 500 ? "server error" : err.message });
 });
 
-app.get("/health", async () => ({ ok: true }));
-await app.register(liveRoutes);
-await app.register(authRoutes);
-await app.register(catalogRoutes);
-await app.register(addressRoutes);
-await app.register(orderRoutes);
-await app.register(adminRoutes);
+// Behind Nginx the API lives at "/" (Nginx strips /api). On Render one Node process
+// serves everything, so set API_PREFIX=/api and STATIC_DIR to the Flutter web build.
+const apiPrefix = (process.env.API_PREFIX ?? "").replace(/\/+$/, "");
+await app.register(
+  async (api) => {
+    api.get("/health", async () => ({ ok: true }));
+    await api.register(liveRoutes);
+    await api.register(authRoutes);
+    await api.register(catalogRoutes);
+    await api.register(addressRoutes);
+    await api.register(orderRoutes);
+    await api.register(adminRoutes);
+  },
+  { prefix: apiPrefix },
+);
+
+const staticDir = process.env.STATIC_DIR;
+if (staticDir) {
+  const noCache = /(^|\/)(index\.html|flutter_service_worker\.js|flutter_bootstrap\.js|main\.dart\.js|manifest\.json|version\.json)$/;
+  await mkdir(uploadDir, { recursive: true });
+  await app.register(fastifyStatic, {
+    root: path.resolve(uploadDir),
+    prefix: "/uploads/",
+    decorateReply: false,
+    maxAge: "30d",
+    immutable: true,
+  });
+  await app.register(fastifyStatic, {
+    root: path.resolve(staticDir),
+    prefix: "/",
+    wildcard: false,
+    cacheControl: false,
+    setHeaders: (res, file) => {
+      res.setHeader("Cache-Control", noCache.test(file.replace(/\\/g, "/")) ? "no-cache" : "public, max-age=3600");
+    },
+  });
+  // Flutter routes are client-side: unknown non-API GETs get index.html.
+  app.setNotFoundHandler((req, reply) => {
+    if (req.method !== "GET" || (apiPrefix && req.url.startsWith(`${apiPrefix}/`)) || req.url.startsWith("/uploads/")) {
+      return reply.code(404).send({ error: "not found" });
+    }
+    reply.header("Cache-Control", "no-cache");
+    return reply.sendFile("index.html");
+  });
+}
 
 await app.listen({ host: process.env.HOST ?? "127.0.0.1", port: Number(process.env.PORT ?? 3000) });
