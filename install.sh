@@ -194,8 +194,15 @@ install_flutter() {
     xz -t "$flutter_tar"
   fi
   rm -rf /opt/flutter
-  tar -C /opt -xf "$flutter_tar"
+  tar -C /opt --no-same-owner -xf "$flutter_tar"
   rm -f "$flutter_tar"
+}
+
+# ไฟล์ใน tar ของ Flutter เป็นของ uid อื่น ถ้าไม่แก้ git จะขึ้น "dubious ownership"
+fix_flutter_owner() {
+  chown -R root:root /opt/flutter
+  git config --global --get-all safe.directory 2>/dev/null | grep -qx /opt/flutter \
+    || git config --global --add safe.directory /opt/flutter
 }
 
 load_env() {
@@ -411,6 +418,7 @@ fi
 
 install_node
 install_flutter
+fix_flutter_owner
 export PATH="${NODE_HOME}/bin:/opt/flutter/bin:${PATH}"
 export PUB_CACHE="/var/cache/flutter-pub"
 export CI=true
