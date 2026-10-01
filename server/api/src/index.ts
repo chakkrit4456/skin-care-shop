@@ -13,6 +13,7 @@ import { addressRoutes } from "./routes/addresses.ts";
 import { adminRoutes } from "./routes/admin.ts";
 import { catalogRoutes } from "./routes/catalog.ts";
 import { orderRoutes } from "./routes/orders.ts";
+import { productImportRoutes } from "./routes/product-import.ts";
 import { uploadDir } from "./uploads.ts";
 
 function loadEnvFile(file: string) {
@@ -68,6 +69,7 @@ await app.register(
     await api.register(addressRoutes);
     await api.register(orderRoutes);
     await api.register(adminRoutes);
+    await api.register(productImportRoutes);
   },
   { prefix: apiPrefix },
 );
