@@ -78,6 +78,18 @@ class ApiClient extends ChangeNotifier {
   Future<String> uploadImage(Uint8List bytes, String filename) async =>
       (await uploadFile('/admin/upload', bytes, filename))['url'] as String;
 
+  /// Sends an .xlsx price list to the server; returns {added, updated, skipped, errors}.
+  Future<Map<String, dynamic>> importProducts(Uint8List bytes, String filename, {bool update = false}) async {
+    final req = http.MultipartRequest('POST', _uri('/admin/products/import', {'mode': update ? 'update' : 'skip'}))
+      ..headers.addAll({if (_token != null) 'Authorization': 'Bearer $_token'})
+      ..files.add(http.MultipartFile.fromBytes('file', bytes,
+          filename: filename,
+          contentType: MediaType('application', 'vnd.openxmlformats-officedocument.spreadsheetml.sheet')));
+    return Map<String, dynamic>.from(await _handle(await http.Response.fromStream(await req.send())) as Map);
+  }
+
+  Uri importTemplateUri() => _uri('/admin/products/import-template');
+
   Future<dynamic> uploadFile(String path, Uint8List bytes, String filename) async {
     final ext = filename.split('.').last.toLowerCase();
     final mime = ext == 'png' ? 'png' : ext == 'webp' ? 'webp' : 'jpeg';
