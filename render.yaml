@@ -35,6 +35,8 @@ services:
         sync: false       # Render จะถามตอนสร้าง (อย่างน้อย 8 ตัว)
       - key: ADMIN_SYNC_PASSWORD
         value: "true"
+      - key: APK_URL
+        value: https://github.com/chakkrit4456/skin-care-shop/releases/download/android-latest/taeia.apk
       - key: LINE_OA_ID
         sync: false
       - key: LINE_CHANNEL_ACCESS_TOKEN
