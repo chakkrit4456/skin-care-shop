@@ -1,0 +1,74 @@
+# Builds the Android app (a real APK, not a PWA) and publishes it as the release
+# "android-latest". The website's Android button downloads it via /downloads/taeia.apk.
+#
+# Repository settings:
+#   Secrets  ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+#            (keep the same keystore forever, otherwise phones cannot update the app)
+#   Variables (optional)  APP_URL (default https://taeia-skin-shop.onrender.com), LINE_OA_ID
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+    paths: ["price_app/**", ".github/workflows/android-apk.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      APP_URL: ${{ vars.APP_URL || 'https://taeia-skin-shop.onrender.com' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Release signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::warning::No signing secrets: the APK is debug-signed and installed copies cannot be updated by later builds."
+            exit 0
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > price_app/android/app/upload-keystore.jks
+          printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=upload-keystore.jks\n' \
+            "$STORE_PASS" "$KEY_PASS" "$KEY_ALIAS" > price_app/android/key.properties
+
+      - name: Build APK
+        working-directory: price_app
+        run: |
+          flutter pub get
+          flutter build apk --release \
+            --build-number=${{ github.run_number }} \
+            --dart-define=API_URL=${APP_URL%/}/api \
+            --dart-define="LINE_OA_ID=${{ vars.LINE_OA_ID }}"
+          cp build/app/outputs/flutter-apk/app-release.apk ../taeia.apk
+
+      - name: Publish release android-latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view android-latest >/dev/null 2>&1 || \
+            gh release create android-latest --title "แอป Android ล่าสุด" --notes "ดาวน์โหลด taeia.apk แล้วติดตั้งบนมือถือ Android"
+          gh release upload android-latest taeia.apk --clobber
+          gh release edit android-latest --notes "build ${{ github.run_number }} · ${GITHUB_SHA::7}"
