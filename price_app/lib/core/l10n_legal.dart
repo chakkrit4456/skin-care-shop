@@ -246,6 +246,8 @@ You are responsible for the address you select. The shop ships to the address st
 - flutter_riverpod, riverpod — MIT — Remi Rousselet
 - cached_network_image, flutter_cache_manager — MIT — Baseflow
 - image_picker — Apache-2.0 / BSD — Flutter team
+- file_picker — MIT — Miguel Ruivo
+- exceljs (เซิร์ฟเวอร์) — MIT
 - shared_preferences — BSD 3-Clause — Flutter team
 - google_fonts — Apache-2.0 — Flutter team (ฟอนต์ Prompt และ Noto Sans SC อยู่ภายใต้สัญญาของเจ้าของฟอนต์)
 - url_launcher — BSD 3-Clause — Flutter team
@@ -279,6 +281,8 @@ The app is built with Flutter and the libraries below. Each keeps its own licens
 - flutter_riverpod, riverpod — MIT — Remi Rousselet
 - cached_network_image, flutter_cache_manager — MIT — Baseflow
 - image_picker — Apache-2.0 / BSD — the Flutter team
+- file_picker — MIT — Miguel Ruivo
+- exceljs (server) — MIT
 - shared_preferences — BSD 3-Clause — the Flutter team
 - google_fonts — Apache-2.0 — the Flutter team (Prompt and Noto Sans SC follow their own font licenses)
 - url_launcher — BSD 3-Clause — the Flutter team
@@ -312,6 +316,8 @@ Prompt was designed by Cadson Demak and is loaded through Google Fonts. Noto San
 - flutter_riverpod、riverpod — MIT — Remi Rousselet
 - cached_network_image、flutter_cache_manager — MIT — Baseflow
 - image_picker — Apache-2.0 / BSD — Flutter 团队
+- file_picker — MIT — Miguel Ruivo
+- exceljs（服务器）— MIT
 - shared_preferences — BSD 3-Clause — Flutter 团队
 - google_fonts — Apache-2.0 — Flutter 团队（Prompt 与 Noto Sans SC 另有字体许可）
 - url_launcher — BSD 3-Clause — Flutter 团队
