@@ -74,6 +74,10 @@ await app.register(
   { prefix: apiPrefix },
 );
 
+// The Android APK is built by GitHub Actions and published as a release asset.
+const apkUrl = process.env.APK_URL;
+if (apkUrl) app.get("/downloads/taeia.apk", async (_req, reply) => reply.redirect(apkUrl, 302));
+
 const staticDir = process.env.STATIC_DIR;
 if (staticDir) {
   const noCache = /(^|\/)(index\.html|flutter_service_worker\.js|flutter_bootstrap\.js|main\.dart\.js|manifest\.json|version\.json)$/;
@@ -96,7 +100,7 @@ if (staticDir) {
   });
   // Flutter routes are client-side: unknown non-API GETs get index.html.
   app.setNotFoundHandler((req, reply) => {
-    if (req.method !== "GET" || (apiPrefix && req.url.startsWith(`${apiPrefix}/`)) || req.url.startsWith("/uploads/")) {
+    if (req.method !== "GET" || (apiPrefix && req.url.startsWith(`${apiPrefix}/`)) || req.url.startsWith("/uploads/") || req.url.startsWith("/downloads/")) {
       return reply.code(404).send({ error: "not found" });
     }
     reply.header("Cache-Control", "no-cache");
