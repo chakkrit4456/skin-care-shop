@@ -28,5 +28,5 @@ flutter build web --release \
 
 echo "==> Installing API dependencies"
 cd "$ROOT/server/api"
-npm ci --omit=dev --no-audit --no-fund
+npm install --omit=dev --no-audit --no-fund
 echo "==> Build finished"
