@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { mkdir, unlink } from "node:fs/promises";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import type { FastifyRequest } from "fastify";
@@ -30,4 +30,14 @@ export async function saveImageUpload(req: FastifyRequest) {
 
 export async function deleteUpload(url: string | null | undefined) {
   if (url?.startsWith("/uploads/")) await unlink(path.join(uploadDir, path.basename(url))).catch(() => {});
+}
+
+/** Saves raw image bytes (e.g. a picture embedded in an Excel file) and returns its public path. */
+export async function saveImageBuffer(data: Uint8Array, ext: string) {
+  const clean = ext.toLowerCase().replace("jpeg", "jpg");
+  if (!["jpg", "png", "webp"].includes(clean)) return null;
+  await mkdir(uploadDir, { recursive: true });
+  const name = `${randomUUID()}.${clean}`;
+  await writeFile(path.join(uploadDir, name), data);
+  return `/uploads/${name}`;
 }
